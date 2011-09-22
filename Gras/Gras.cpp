@@ -1,8 +1,9 @@
 #ifdef _WIN32
 #include "windows.h"
 #endif
+#include "Gpu.h"
 #include "Camera.h"
-#include "fileloader.h"
+#include "Fileloader.h"
 #include <gl\glew.h>
 #include <gl\gl.h>
 #include <gl\glu.h>
@@ -24,7 +25,8 @@ static void redraw(void);
 static void update(void);
 static void init(int, char);
 static void idle(void);
-void initVars();
+void closeFunc();
+
 void setupCamera();
 void setupScene();
 void loadShader();
@@ -46,6 +48,7 @@ bool running;
 double fps;
 int width, height;
 Camera cam;
+Gpu kernels;
 
 
 int main(int argc, char **argv)
@@ -59,6 +62,7 @@ int main(int argc, char **argv)
 	glutDisplayFunc(update);	
 	glutIdleFunc(idle);
 	glutReshapeFunc(resize);
+	glutCloseFunc(closeFunc);
 		//Hanterar mus-rörelse
 	glutPassiveMotionFunc(mouseMovement);
 		//Hantera mus-klick
@@ -69,16 +73,9 @@ int main(int argc, char **argv)
 	glutMainLoop();
 	return 0; 
 }
-
-void initVars()
+void closeFunc()
 {
-	t0 = 0.0;
-	frame = 0;
-	running = true;
-	fps = 0;
-	width = glutGet(GLUT_WINDOW_WIDTH);
-	height = glutGet(GLUT_WINDOW_HEIGHT);
-	glutSetCursor(GLUT_CURSOR_NONE); 
+	//Exit function
 }
 void setupCamera()
 {
@@ -95,7 +92,7 @@ void setupCamera()
     glMatrixMode(GL_PROJECTION); // "We want to edit the projection matrix"
     glLoadIdentity(); // Reset the matrix to identity
     // 65 degrees FOV, same aspect ratio as window, depth range 1 to 100
-    gluPerspective( 65.0f, (GLfloat)width/(GLfloat)height, 1.0f, 100.0f );
+    gluPerspective( 65.0f, (GLfloat)width/(GLfloat)height, 0.3f, 100.0f );
 
     // Select and setup the modelview matrix.
     glMatrixMode( GL_MODELVIEW ); // "We want to edit the modelview matrix"
@@ -105,18 +102,50 @@ void setupCamera()
                0.0f, 1.0f, 0.0f,   // View point
                0.0f, 0.0f, 1.0f );  // Up vector
 }
+void temp()
+{
+	int n = 500;
+	// Allocate some memory and a place for the results
+	
+	float  *a = (float *)malloc(n*sizeof(float));
+	float* b = (float *)malloc(n*sizeof(float));
+	float* results = (float *)malloc(n*sizeof(float));
+	
+	// Fill in the values
+	for(int i=0;i<n;i++)
+	{
+		a[i] = (float)i;
+		b[i] = (float)n-i;
+		results[i] = 0.f;
+	}
+	kernels.runCl(a, b, results, n);
+}
 void setupScene()
 {
-	initVars();
+	t0 = 0.0;
+	frame = 0;
+	running = true;
+	fps = 0;
+	width = glutGet(GLUT_WINDOW_WIDTH);
+	height = glutGet(GLUT_WINDOW_HEIGHT);
+
+	//Dölj pekaren när musen är i fönstret!
+	glutSetCursor(GLUT_CURSOR_NONE);
+
+	//Skapa OpenCL-variabeln som kommer att utföra
+	//alla beräkningar som skall ske på gpun!
+	kernels.initCl();
+	//Läs in shaders som skall användas!
+	temp();
+	
 	loadShader();
+	
+	//Initiera kameran!
 	setupCamera();
 
 	glEnable(GL_CULL_FACE); // Cull away all back facing polygons
     glEnable(GL_DEPTH_TEST); // Use the Z buffer
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-
-
 }
 void loadShader()
 {
@@ -126,29 +155,34 @@ void loadShader()
 	  // Problem: glewInit failed, something is seriously wrong.
 	  fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
 	}
+	//Kan inte använda shaders
 	if (!GLEW_ARB_vertex_shader && !GLEW_ARB_fragment_shader)
 	{
 		cout << "Not totally ready";
 		exit(1);
 	}
+	//Source till shaders
 	char* fragment_shader_source;
 	char* vertex_shader_source;
+
+	//shaders läggs i dessa
 	GLenum sp, vs, fs;
+
 	vs = glCreateShader(GL_VERTEX_SHADER);
-	char* vsSource = fileloader::load_source("vertex.vert");
+	char* vsSource = Fileloader::load_source("vertex.vert");
 	glShaderSource(vs, 1, (const GLchar**)&vsSource, NULL);
 	glCompileShader(vs);
-	
+	//Test ifall vertex-shadern kompilerar
 	GLint compiled;
-	
 	glGetObjectParameterivARB(vs, GL_COMPILE_STATUS, &compiled);
 	if (!compiled)
 	{
 	   cout << "Vertex shader didn't compile!!";
 	}   
-
+	//Samma sak görs för fragment-shadern som för
+	//Vertexshadern!
 	fs = glCreateShader(GL_FRAGMENT_SHADER);
-	char* fsSource = fileloader::load_source("vertex.vert");
+	char* fsSource = Fileloader::load_source("vertex.vert");
 	glShaderSource(fs, 1, (const GLchar**)&fsSource, NULL);
 	glCompileShader(fs);
 	glGetObjectParameterivARB(fs, GL_COMPILE_STATUS, &compiled);
@@ -156,21 +190,22 @@ void loadShader()
 	{
 	   cout << "Fragment shader didn't compile!!";
 	}   
-
+	//Frigör minne från source-koden
 	free(vsSource);
 	free(fsSource);
+	//Bestämmer att man använder sp!
 	sp = glCreateProgram();
 	glLinkProgram(sp);
 	glUseProgram(sp);
 
 }
-int runCL(float * a, float * b, float * results, int n)
-{
+//int runCL(float * a, float * b, float * results, int n)
+//{
 	/*
 	*Program skapas av att kompilera en kernel-fil, det görs i programmet och
 	*genererar ett gäng kernels (GPU-funktioner) som gör beräkningar med hjälp
 	*av grafikkortet. Alla kernels sparas i kernel-arrayen kernel.
-	*/
+	*//*
 	cl_program program[1];
 	cl_kernel kernel[2];
 	
@@ -213,7 +248,7 @@ int runCL(float * a, float * b, float * results, int n)
 	// The kernel/program is the project directory and in Xcode the executable
 	// is set to launch from that directory hence we use a relative path
 	const char * filename = "kernels.cl";
-	char *program_source = fileloader::load_source(filename);
+	char *program_source = Fileloader::load_source(filename);
 	program[0] = clCreateProgramWithSource(context, 1, (const char**)&program_source,
 											NULL, &err);
 	assert(err == CL_SUCCESS);
@@ -273,9 +308,9 @@ int runCL(float * a, float * b, float * results, int n)
 		
 	clReleaseCommandQueue(cmd_queue);
 	clReleaseContext(context);
-
-	return CL_SUCCESS;
-}
+*/
+//	return CL_SUCCESS;
+//}
 void drawColorFloor()
 {
 	glPushMatrix();
@@ -401,15 +436,13 @@ void drawColorSphere(float r, int segs)
 void mouseMovement(int x, int y)
 {
 	cam.handleMouseMovement(x,y);
-	int margin = 30;
-	if(x > width-margin || y > height-margin || x < margin || y < margin)
+	//Om man har flyttat musen återställs positionen till det ursprungliga läget!
+	if(cam.lastx != width /2 || cam.lasty != height / 2)
 	{
 		glutWarpPointer(width /2, height / 2);
-		cam.lastx = width/2;
-		cam.lasty = height/2;
+		cam.lastx = (float)width/2;
+		cam.lasty = (float)height/2;
 	}
-	
-
 	
 }
 void keyRelease(unsigned char key, int x, int y)

@@ -1,6 +1,6 @@
-#include "fileloader.h"
+#include "Fileloader.h"
 
-char *fileloader::load_source(const char *filename)
+char *Fileloader::load_source(const char *filename)
 { 
 	struct stat statbuf;
 	FILE *fh; 

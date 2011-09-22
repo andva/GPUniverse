@@ -1,11 +1,14 @@
+#ifndef GPU_H
+#define GPU_H
 
 #include <CL\opencl.h>
 #include <iostream>
 #include <assert.h>
-#include "fileloader.h"
+#include <string>
+#include "Fileloader.h"
 using namespace std;
 
-class gpu
+class Gpu
 {
 public:
 	/*
@@ -26,8 +29,12 @@ public:
 	
 	cl_mem a_mem, b_mem, ans_mem;
 
+
+
 	void initCl();
 	void setupKernels();
-	void runCl(float*, float*, float*);
+	void runCl(float*, float*, float*, int);
 	void deallocateCL();
+	string print_cl_errstring(cl_int err);
 };
+#endif
